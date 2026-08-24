@@ -1,7 +1,12 @@
 package gg.duo.post.service;
 
+import gg.duo.common.constant.GameCode;
+import gg.duo.common.constant.VoiceChat;
 import gg.duo.common.dto.UserDto;
 import gg.duo.post.client.UserClient;
+import gg.duo.post.domain.requirement.GameOptions;
+import gg.duo.post.domain.requirement.PostGameRequirement;
+import gg.duo.post.domain.requirement.PostGameRequirementRepository;
 import gg.duo.post.domain.application.Application;
 import gg.duo.post.domain.application.ApplicationRepository;
 import gg.duo.post.domain.post.Post;
@@ -24,6 +29,7 @@ public class PostService {
 
     private final PostRepository postRepository;
     private final ApplicationRepository applicationRepository;
+    private final PostGameRequirementRepository requirementRepository;
 
     /**
      * chat 리포지토리 세 개(ChatRoom / ChatRoomMember / ChatMessage)가 사라졌다.
@@ -131,7 +137,8 @@ public class PostService {
         Post post = new Post();
         post.setAuthorId(meId);
         applyFields(post, req);
-        postRepository.save(post);
+        postRepository.save(post);   // id 가 있어야 조건 행을 붙일 수 있다
+        applyRequirement(post, req);
 
         // chat 이 이 글의 파티 채팅방을 미리 연다. 방 번호는 ChatRoomCreatedEvent 로
         // 돌아와 posts.chat_room_id 에 채워진다. (PostEventPublisher 주석 참고)
@@ -147,6 +154,7 @@ public class PostService {
         if (!post.getAuthorId().equals(meId))
             throw new SecurityException("본인이 작성한 글만 수정할 수 있습니다.");
         applyFields(post, req);
+        applyRequirement(post, req);
         events.postUpdated(post);
         return toDto(post, meId, authorsOf(List.of(post)));
     }
@@ -178,26 +186,109 @@ public class PostService {
         events.postDeleted(postId);
 
         applicationRepository.deleteByPostId(postId);
+        requirementRepository.deleteByPostId(postId);
         postRepository.delete(post);
     }
 
     private void applyFields(Post post, PostDto.WriteRequest req) {
         post.setTitle(req.title());
         post.setContent(req.content());
-        post.setGame(req.game());
-        post.setGameMode(req.gameMode());
+        post.setGame(gameOf(req).name());
+        post.setGameMode(blankToNull(req.gameMode()));
         post.setPlayTime(req.playTime());
-        post.setMicRequired(req.micRequired());
-        post.setPositions(req.positions());
+        post.setVoiceChat(voiceOf(req));
         int target = req.targetMembers() == null ? 2 : req.targetMembers();
         post.setTargetMembers(Math.max(2, Math.min(target, 10)));
     }
 
+    /**
+     * 게임별 조건을 글 하나당 한 행으로 맞춘다.
+     *
+     * 지웠다 다시 넣지 않고 갱신하는 이유: 행을 새로 만들면 id 가 바뀐다.
+     * 나중에 추천 결과가 이 id 를 참조하게 되면(캐시·로그) 수정할 때마다
+     * 그 참조가 끊긴다. 게임을 바꿔도 "이 글의 조건"이라는 정체성은 그대로다.
+     */
+    private void applyRequirement(Post post, PostDto.WriteRequest req) {
+        GameCode game = gameOf(req);
+
+        PostGameRequirement r = requirementRepository.findByPostId(post.getId()).stream()
+                .findFirst()
+                .orElseGet(() -> {
+                    PostGameRequirement created = new PostGameRequirement();
+                    created.setPostId(post.getId());
+                    return created;
+                });
+
+        r.setGameCode(game);
+        r.setRoles(normalizeRoles(req.roles()));
+        r.setTier(blankToNull(req.tier()));
+        r.setPlayStyle(blankToNull(req.playStyle()));
+        requirementRepository.save(r);
+    }
+
+    /**
+     * '상관없음'은 저장하지 않고 빈 값으로 만든다.
+     *
+     * 조건이 없다는 뜻인데 문자열로 남겨두면 추천 쪽에서 "포지션이 '상관없음'인
+     * 사람을 찾는다"로 읽힐 수 있다. 없음은 없음으로 저장하는 편이 안전하다.
+     */
+    private static String normalizeRoles(String csv) {
+        if (csv == null || csv.isBlank()) return null;
+        String cleaned = java.util.Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(v -> !v.isEmpty() && !"상관없음".equals(v))
+                .distinct()
+                .reduce((a, b) -> a + "," + b)
+                .orElse("");
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    private static GameCode gameOf(PostDto.WriteRequest req) {
+        try {
+            return GameCode.valueOf(req.game().trim().toUpperCase());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("게임을 선택해주세요.");
+        }
+    }
+
+    /** 마이그레이션 전에 저장된 행은 voice_chat 이 비어 있을 수 있다. */
+    private static String voiceOf(Post post) {
+        return (post.getVoiceChat() == null ? VoiceChat.ANY : post.getVoiceChat()).name();
+    }
+
+    private static VoiceChat voiceOf(PostDto.WriteRequest req) {
+        if (req.voiceChat() == null || req.voiceChat().isBlank()) return VoiceChat.ANY;
+        try {
+            return VoiceChat.valueOf(req.voiceChat().trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("음성채팅 정도 값이 올바르지 않습니다.");
+        }
+    }
+
+    /**
+     * 검증.
+     *
+     * [FR-02] 게임별 선택지를 서버에서도 확인한다. 화면만 막아두면 API 를 직접
+     * 부르는 쪽에서 발로란트 글에 '정글'이 들어가고, 그런 글은 에러 없이
+     * "추천 0건"으로만 나타나 원인을 추적하기 어렵다.
+     */
     private void validate(PostDto.WriteRequest req) {
         if (req.title() == null || req.title().isBlank())
             throw new IllegalArgumentException("제목을 입력해주세요.");
         if (req.content() == null || req.content().isBlank())
             throw new IllegalArgumentException("내용을 입력해주세요.");
+
+        GameCode game = gameOf(req);
+        voiceOf(req);
+        GameOptions.requireAllIn(stripAny(req.roles()), GameOptions.roles(game), "포지션/역할");
+        GameOptions.requireIn(stripAny(req.tier()), GameOptions.tiers(game), "티어");
+        GameOptions.requireIn(stripAny(req.gameMode()), GameOptions.modes(game), "게임 모드");
+        GameOptions.requireIn(stripAny(req.playStyle()), GameOptions.playStyles(), "플레이스타일");
+    }
+
+    /** 검증 전에 '상관없음'을 걷어낸다. 조건 없음은 검사 대상이 아니다. */
+    private static String stripAny(String csv) {
+        return normalizeRoles(csv);
     }
 
     /**
@@ -251,27 +342,52 @@ public class PostService {
         return new Extras(myStatus, mine, pending, currentMembers, myRoomId);
     }
 
+    /**
+     * 글 묶음의 게임별 조건을 한 번에 가져온다.
+     *
+     * 글마다 findByPostId 를 부르면 목록 한 페이지에 쿼리 20개가 더 붙는다.
+     * 작성자 조회를 묶음으로 만든 것과 같은 이유다.
+     */
+    private Map<Long, PostGameRequirement> requirementsOf(List<Post> posts) {
+        if (posts.isEmpty()) return Map.of();
+        List<Long> ids = posts.stream().map(Post::getId).toList();
+        return requirementRepository.findByPostIdIn(ids).stream()
+                // 글당 한 행이지만, 과거 데이터에 여러 행이 있어도 첫 행으로 수렴시킨다.
+                .collect(java.util.stream.Collectors.toMap(
+                        PostGameRequirement::getPostId, r -> r, (a, b) -> a));
+    }
+
     private List<PostDto.Summary> toSummaries(List<Post> posts, Long meId) {
         Map<Long, UserDto> authors = authorsOf(posts);
-        return posts.stream().map(p -> toSummary(p, meId, authors)).toList();
+        Map<Long, PostGameRequirement> reqs = requirementsOf(posts);
+        return posts.stream().map(p -> toSummary(p, meId, authors, reqs.get(p.getId()))).toList();
     }
 
     /** 목록용 — content 를 싣지 않는다. */
-    private PostDto.Summary toSummary(Post p, Long meId, Map<Long, UserDto> authors) {
+    private PostDto.Summary toSummary(Post p, Long meId, Map<Long, UserDto> authors,
+                                      PostGameRequirement r) {
         Extras e = extras(p, meId);
         return new PostDto.Summary(p.getId(), p.getTitle(), p.getCreatedAt(),
                 authors.get(p.getAuthorId()), e.pending(), e.myStatus(), e.mine(),
-                p.getGame(), p.getGameMode(), p.getPlayTime(), p.isMicRequired(),
-                p.getPositions(), p.getTargetMembers(), e.currentMembers(),
-                p.getStatus().name(), e.myRoomId());
+                p.getGame(), p.getGameMode(), p.getPlayTime(), voiceOf(p),
+                p.getTargetMembers(),
+                r == null ? null : r.getRoles(),
+                r == null ? null : r.getTier(),
+                r == null ? null : r.getPlayStyle(),
+                e.currentMembers(), p.getStatus().name(), e.myRoomId());
     }
 
     private PostDto toDto(Post p, Long meId, Map<Long, UserDto> authors) {
         Extras e = extras(p, meId);
+        PostGameRequirement r = requirementRepository.findByPostId(p.getId())
+                .stream().findFirst().orElse(null);
         return new PostDto(p.getId(), p.getTitle(), p.getContent(), p.getCreatedAt(),
                 authors.get(p.getAuthorId()), e.pending(), e.myStatus(), e.mine(),
-                p.getGame(), p.getGameMode(), p.getPlayTime(), p.isMicRequired(),
-                p.getPositions(), p.getTargetMembers(), e.currentMembers(),
-                p.getStatus().name(), e.myRoomId());
+                p.getGame(), p.getGameMode(), p.getPlayTime(), voiceOf(p),
+                p.getTargetMembers(),
+                r == null ? null : r.getRoles(),
+                r == null ? null : r.getTier(),
+                r == null ? null : r.getPlayStyle(),
+                e.currentMembers(), p.getStatus().name(), e.myRoomId());
     }
 }

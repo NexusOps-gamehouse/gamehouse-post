@@ -1,5 +1,6 @@
 package gg.duo.post.controller;
 
+import gg.duo.post.domain.requirement.GameOptions;
 import gg.duo.post.dto.PostDto;
 import gg.duo.post.service.PostService;
 import lombok.RequiredArgsConstructor;
@@ -7,6 +8,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -16,6 +18,18 @@ public class PostController {
 
     private Long userId(Authentication auth) {
         return auth == null ? null : (Long) auth.getPrincipal();
+    }
+
+    /**
+     * 게임별 선택지 목록.
+     *
+     * [FR-02] 화면이 그리는 목록과 서버가 검증하는 목록이 어긋나면, 사용자는
+     * 고를 수 있는데 저장은 400 이 나는 항목이 생긴다. 프론트가 이 응답을 쓰면
+     * 목록이 한 곳에서만 관리된다.
+     */
+    @GetMapping("/api/posts/game-options")
+    public List<Map<String, Object>> gameOptions() {
+        return GameOptions.catalogAll();
     }
 
     /**

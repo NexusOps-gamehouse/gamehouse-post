@@ -13,20 +13,30 @@ public record PostDto(
         long pendingCount,
         String myApplicationStatus, // null | PENDING | APPROVED | CONFIRMED | REJECTED
         boolean mine,
-        // 모집 조건
-        String game,
+        // 모집 조건 (공통)
+        String game,                // GameCode 이름. "LOL" | "VALORANT"
         String gameMode,
         String playTime,
-        boolean micRequired,
-        String positions,
+        String voiceChat,           // REQUIRED | PREFERRED | ANY
         int targetMembers,
+        // 모집 조건 (게임별) — PostGameRequirement 에서 온다. 조건을 안 걸었으면 null
+        String roles,               // 포지션(LOL) 또는 역할(VALORANT), 콤마 구분
+        String tier,
+        String playStyle,           // 빡겜 | 즐겜
         long currentMembers,        // 파티 채팅방 인원 (방장 포함, 방 없으면 1)
         String status,              // RECRUITING | CLOSED
         Long chatRoomId             // 내가 멤버인 경우에만 세팅
 ) {
+    /**
+     * 작성·수정 요청.
+     *
+     * roles / tier / playStyle 은 고른 게임에 따라 유효한 값이 달라진다.
+     * 검증은 서버(GameOptions)가 한다 — 프론트만 막으면 API 를 직접 부르는 쪽에서
+     * 발로란트 글에 '정글'이 들어가고, 그 글은 어떤 추천에도 안 걸린다.
+     */
     public record WriteRequest(String title, String content, String game, String gameMode,
-                               String playTime, boolean micRequired, String positions,
-                               Integer targetMembers) {}
+                               String playTime, String voiceChat, Integer targetMembers,
+                               String roles, String tier, String playStyle) {}
 
     /**
      * 목록 전용 응답. PostDto 에서 content 만 뺀 형태다.
@@ -46,9 +56,11 @@ public record PostDto(
             String game,
             String gameMode,
             String playTime,
-            boolean micRequired,
-            String positions,
+            String voiceChat,
             int targetMembers,
+            String roles,
+            String tier,
+            String playStyle,
             long currentMembers,
             String status,
             Long chatRoomId
