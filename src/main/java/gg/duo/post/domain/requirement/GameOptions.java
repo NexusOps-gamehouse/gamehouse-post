@@ -4,6 +4,7 @@ import gg.duo.common.constant.GameCode;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -43,6 +44,60 @@ public final class GameOptions {
 
     /** 플레이스타일은 게임과 무관하게 같다. 사용자 프로필(users.play_style)과 같은 값이어야 한다. */
     private static final List<String> PLAY_STYLES = List.of("빡겜", "즐겜");
+
+    /**
+     * 게임을 가리키는 여러 표기를 코드 하나로 모은다.
+     *
+     * [왜 필요한가] posts.game 은 FR-02 에서 표시명("리그오브레전드")에서 코드("LOL")로
+     * 바뀌었다. 그런데 목록 검색을 부르는 쪽이 하나가 아니다. match 서비스는 프론트에서
+     * 받은 한글 표시명을 그대로 GET /api/posts 의 game 파라미터로 넘긴다
+     * (match/client/PostClient). 저장 값만 바꾸고 조회를 그대로 두면, 그쪽 호출은
+     * 에러가 아니라 "결과 0건"으로 돌아온다 — 스마트 매칭이 아무것도 못 찾는데
+     * 어디가 잘못됐는지는 아무 데도 안 남는다.
+     *
+     * 그래서 저장은 코드로 하되, 조회는 옛 표기도 알아듣게 한다. 부르는 쪽을 전부
+     * 고치는 것보다 받는 쪽 한 곳이 흡수하는 편이 안전하다.
+     */
+    private static final Map<String, GameCode> ALIASES = Map.ofEntries(
+            Map.entry("LOL", GameCode.LOL),
+            Map.entry("리그오브레전드", GameCode.LOL),
+            Map.entry("리그 오브 레전드", GameCode.LOL),
+            Map.entry("롤", GameCode.LOL),
+            Map.entry("LEAGUEOFLEGENDS", GameCode.LOL),
+            Map.entry("VALORANT", GameCode.VALORANT),
+            Map.entry("발로란트", GameCode.VALORANT),
+            Map.entry("발로", GameCode.VALORANT));
+
+    /**
+     * 저장용 — 어떤 표기로 와도 코드로 바꾼다. 못 알아보면 예외.
+     *
+     * 조회와 달리 여기서는 조용히 넘어가면 안 된다. 잘못된 게임으로 저장된 글은
+     * 어떤 검색에도 걸리지 않는 채로 DB 에 남는다.
+     */
+    public static GameCode parse(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new IllegalArgumentException("게임을 선택해주세요.");
+        GameCode found = ALIASES.get(raw.trim().toUpperCase(Locale.ROOT));
+        if (found == null) found = ALIASES.get(raw.trim());
+        if (found == null)
+            throw new IllegalArgumentException("지원하지 않는 게임입니다: " + raw);
+        return found;
+    }
+
+    /**
+     * 조회 필터용 — 아는 표기는 코드로, 빈 값은 null(필터 없음)로 바꾼다.
+     *
+     * 모르는 값은 예외를 던지지 않고 그대로 돌려준다. 목록 조회는 사용자가 URL 을
+     * 직접 만질 수 있는 자리라, 오타 하나로 500 이 나는 것보다 "결과 0건"이 낫다.
+     * (저장 경로는 위 parse 가 막는다)
+     */
+    public static String normalizeFilter(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String trimmed = raw.trim();
+        GameCode found = ALIASES.get(trimmed.toUpperCase(Locale.ROOT));
+        if (found == null) found = ALIASES.get(trimmed);
+        return found == null ? trimmed : found.name();
+    }
 
     public static List<String> roles(GameCode game) { return ROLES.getOrDefault(game, List.of()); }
 

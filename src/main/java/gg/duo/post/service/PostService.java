@@ -57,7 +57,9 @@ public class PostService {
                                      String game, String gameMode, String status,
                                      int page, int size) {
         String kw = blankToNull(keyword);
-        String g = blankToNull(game);
+        // 옛 표기("리그오브레전드")로 부르는 호출자(match 서비스)도 있어 코드로 맞춰준다.
+        // 저장 값만 코드로 바꾸고 여기를 두면 그쪽은 에러 없이 "0건"만 받는다.
+        String g = GameOptions.normalizeFilter(game);
         String gm = blankToNull(gameMode);
 
         Post.Status st = null;
@@ -244,11 +246,7 @@ public class PostService {
     }
 
     private static GameCode gameOf(PostDto.WriteRequest req) {
-        try {
-            return GameCode.valueOf(req.game().trim().toUpperCase());
-        } catch (Exception e) {
-            throw new IllegalArgumentException("게임을 선택해주세요.");
-        }
+        return GameOptions.parse(req.game());
     }
 
     /** 마이그레이션 전에 저장된 행은 voice_chat 이 비어 있을 수 있다. */
