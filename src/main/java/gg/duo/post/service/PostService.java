@@ -12,6 +12,7 @@ import gg.duo.post.domain.application.ApplicationRepository;
 import gg.duo.post.domain.post.Post;
 import gg.duo.post.domain.post.PostRepository;
 import gg.duo.post.dto.PostDto;
+import gg.duo.post.dto.PostPartyView;
 import gg.duo.post.event.publisher.PostEventPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -131,6 +133,27 @@ public class PostService {
         List<Post> posts = postRepository.findByAuthorIdOrderByCreatedAtDesc(meId);
         Map<Long, UserDto> authors = authorsOf(posts);
         return posts.stream().map(p -> toDto(p, meId, authors)).toList();
+    }
+
+    /**
+     * 서비스 간 조회용 — match 가 Team Fit 계산에 쓰는 "글별 확정 파티원 id".
+     *
+     * 한 건씩 부르면 match 가 후보 글 100개를 볼 때마다 쿼리 100번이 나간다.
+     * applications 테이블을 postId IN (...) 로 한 번에 긁어서 글별로 묶는다.
+     */
+    @Transactional(readOnly = true)
+    public List<PostPartyView> confirmedPartyMembers(List<Long> postIds) {
+        if (postIds == null || postIds.isEmpty()) return List.of();
+
+        Map<Long, List<Long>> byPost = applicationRepository
+                .findByPost_IdInAndStatus(postIds, Application.Status.CONFIRMED).stream()
+                .collect(Collectors.groupingBy(
+                        a -> a.getPost().getId(),
+                        Collectors.mapping(Application::getApplicantId, Collectors.toList())));
+
+        return postIds.stream()
+                .map(id -> new PostPartyView(id, byPost.getOrDefault(id, List.of())))
+                .toList();
     }
 
     @Transactional
