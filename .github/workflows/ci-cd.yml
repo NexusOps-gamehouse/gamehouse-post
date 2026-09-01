@@ -223,38 +223,17 @@ jobs:
       #   after   GitHub 이 서명한 토큰을 AWS 가 확인하고 이 실행에만 유효한
       #           임시 자격증명을 발급한다. 저장되는 비밀이 없다.
       #
-      # 역할의 신뢰정책이 "NexusOps-gamehouse 조직의 develop 브랜치" 로 범위를
-      # 제한한다. 역할 ARN 은 비밀이 아니므로 secret 에 넣지 않는다.
-      # ⚠️ 임시 디버그 스텝. OIDC 문제 확인이 끝나면 삭제한다.
+      # 역할 ARN 은 조직 secret AWS_ROLE_ARN 에 둔다.
+      # 값 자체가 기밀은 아니지만 이 레포들이 public 이라 계정 ID 를 굳이
+      # 노출하지 않는다. 계정이나 역할 이름이 바뀌어도 secret 하나만 고치면
+      # 6개 레포가 함께 따라간다.
       #
-      # GitHub 이 실제로 발급한 토큰의 payload 를 디코드해 sub / aud 를 찍는다.
-      # 추측한 값이 아니라 AWS 가 실제로 검사하는 값이다.
-      # 토큰 자체는 출력하지 않는다(그건 자격증명이다). payload 의 클레임만 본다.
-      - name: Debug OIDC claims (임시)
-        run: |
-          echo "--- GitHub 컨텍스트 ---"
-          echo "repository : ${{ github.repository }}"
-          echo "ref        : ${{ github.ref }}"
-          echo "event      : ${{ github.event_name }}"
-
-          echo "--- 실제 토큰 클레임 ---"
-          TOKEN=$(curl -sSL \
-            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "::error::토큰을 받지 못했다. permissions.id-token: write 를 확인할 것"
-            exit 1
-          fi
-
-          PAYLOAD=$(echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+')
-          while [ $((${#PAYLOAD} % 4)) -ne 0 ]; do PAYLOAD="${PAYLOAD}="; done
-          echo "$PAYLOAD" | base64 -d | jq '{sub, aud, iss, repository, ref, workflow_ref}'
-
+      # 리전은 코드에 그대로 둔다 — 바뀔 일이 거의 없고, secret 이 늘수록
+      # "왜 실패했지" 의 후보가 늘어난다.
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::359554936090:role/gamehouse-gha-ecr
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-northeast-2
 
       - name: Login to Amazon ECR
