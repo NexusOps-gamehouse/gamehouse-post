@@ -257,11 +257,15 @@ jobs:
           secret-files: |
             gpr=gradle.properties.ci
 
-          # 움직이는 태그(develop) + 고정 태그(SHA) 조합.
-          # develop 은 "지금 최신", SHA 는 "정확히 이 커밋" 을 가리켜 롤백 기준이 된다.
+          # 브랜치 이름 = "그 브랜치의 지금 최신", SHA = "정확히 이 커밋" → 롤백 기준.
           # 서비스별 레포라 태그에 서비스명 접두사가 필요 없어졌다.
+          #
+          # ⚠️ 브랜치를 하드코딩하지 말 것. 이 워크플로는 develop 과 main 양쪽에서
+          #    돈다(on.push.branches). :develop 으로 고정하면 main 에서 돈 이미지가
+          #    develop 태그를 덮어써 어느 브랜치 것인지 구분이 사라진다.
+          #    Docker Hub 때의 post-${{ github.ref_name }} 와 같은 동작이다.
           tags: |
-            ${{ steps.ecr.outputs.registry }}/gamehouse-post:develop
+            ${{ steps.ecr.outputs.registry }}/gamehouse-post:${{ github.ref_name }}
             ${{ steps.ecr.outputs.registry }}/gamehouse-post:${{ github.sha }}
 
           cache-from: type=gha,scope=post
