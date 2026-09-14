@@ -33,6 +33,29 @@ public class PostController {
     }
 
     /**
+     * 배포 확인용 엔드포인트.
+     *
+     * GitOps 파이프라인(GitHub Actions -> ECR -> infra newTag -> Argo CD)이 실제로
+     * 클러스터까지 도달했는지 밖에서 확인하려고 둔다. 읽기 전용이고 어떤 상태도
+     * 바꾸지 않으며 비즈니스 로직을 타지 않는다.
+     *
+     * 경로는 반드시 한 단계로 유지한다 - SecurityConfig 가 permitAll 로 여는 것은
+     * GET /api/posts/* 이고 이건 세그먼트 하나만 매칭한다. /api/posts/meta/check 처럼
+     * 한 단계 더 내리면 permitAll 이 걸리지 않아 401 이 된다.
+     *
+     * /api/posts/{id} 와 겹쳐 보이지만 리터럴 경로가 경로 변수보다 우선한다 -
+     * 같은 컨트롤러의 /api/posts/game-options 가 이미 같은 방식으로 동작한다.
+     */
+    @GetMapping("/api/posts/deploy-check")
+    public Map<String, String> deployCheck() {
+        return Map.of(
+                "service", "post",
+                "status", "ok",
+                "message", "GitOps 자동 배포 확인용 엔드포인트입니다."
+        );
+    }
+
+    /**
      * 모집글 목록.
      *
      * page/size 를 주지 않으면 최신 20개를 돌려준다. 예전에는 전체를 돌려줬는데,
