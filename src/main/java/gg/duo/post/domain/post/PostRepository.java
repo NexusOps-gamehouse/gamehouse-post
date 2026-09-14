@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface PostRepository extends JpaRepository<Post, Long> {
@@ -111,4 +112,24 @@ public interface PostRepository extends JpaRepository<Post, Long> {
                                  @Param("status") Post.Status status,
                                  @Param("authorIds") List<Long> authorIds,
                                  Pageable pageable);
+
+    // -----------------------------------------------------------------------
+    // 보정 배치용
+    //
+    // chat_room_id 는 ChatRoomCreatedEvent 로만 채워진다. 그 이벤트가 유실되면
+    // 방은 있는데 글이 방 번호를 모르거나, 방 자체가 없는 상태로 남는다.
+    // 운영 실측에서 조치 전 22%, 조치 후 6.2% 가 그랬다.
+    //
+    // 갓 만들어진 글은 아직 왕복 중일 수 있으므로 제외한다. cutoff 이전 것만 본다.
+    //
+    // ⚠️ 이 조건에는 반드시 부분 인덱스가 있어야 한다. 없으면 posts 전체를 매번
+    //    훑는다(ddl-auto 로는 부분 인덱스를 만들 수 없어 수동 적용한다).
+    //
+    //      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_posts_missing_chat_room
+    //        ON post_svc.posts (created_at) WHERE chat_room_id IS NULL;
+    //
+    //    조건에 맞는 행만 담으므로 평소에는 거의 비어 있다.
+    List<Post> findByChatRoomIdIsNullAndCreatedAtBefore(Instant cutoff, Pageable pageable);
+
+    long countByChatRoomIdIsNull();
 }
