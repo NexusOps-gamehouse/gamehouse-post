@@ -18,6 +18,14 @@ spring:
     port: ${RABBITMQ_AMQP_PORT:5672}
     username: ${RABBITMQ_USERNAME:appuser}
     password: ${RABBITMQ_PASSWORD:apppass}
+    # 기본값 60초. 브로커가 응답하지 않을 때 요청 스레드가 그만큼 붙잡힌다.
+    # 실측에서 브로커 공백 35초 동안 요청이 그대로 36초를 기다렸고, 그 사이
+    # DB 커넥션을 쥔 채라 풀(10개)이 7~9초 만에 고갈됐다. 그러면 브로커와
+    # 무관한 조회 API 까지 같이 막힌다.
+    #
+    # 2초로 끊으면 장애 구간의 요청은 대부분 실패한다. 그 대신 커넥션이 돌아와
+    # 서비스 전체는 살아남는다. 한 기능의 지연을 서비스 전체의 중단과 바꾸지 않는다.
+    connection-timeout: ${RABBITMQ_CONNECTION_TIMEOUT:2s}
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/duo}
     # 서비스 전용 DB 계정. 자기 스키마 밖은 권한이 없어서, 남의 테이블을 읽는
